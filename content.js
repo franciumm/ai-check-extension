@@ -1,60 +1,82 @@
 // content.js
 // Non-destructive floating button approach with "Pin on Click" logic
 
-let hoverButton = null;
+let hoverContainer = null;
 let activeHoverImage = null;
-const pinnedButtons = new Map(); // Maps img -> pinned button element
+const pinnedContainers = new Map(); // Maps img -> pinned container element
 
-function createButton() {
-  const btn = document.createElement('button');
-  btn.className = 'aicheck-btn aicheck-floating';
-  btn.textContent = 'Check?';
-  btn.style.display = 'none';
-  document.body.appendChild(btn);
-  return btn;
+function createContainer() {
+  const container = document.createElement('div');
+  container.className = 'aicheck-container aicheck-floating';
+  container.style.display = 'none';
+  
+  const btnLocal = document.createElement('button');
+  btnLocal.className = 'aicheck-btn btn-local';
+  btnLocal.textContent = 'Local Check';
+  btnLocal.dataset.mode = 'LOCAL';
+  
+  const btnDeep = document.createElement('button');
+  btnDeep.className = 'aicheck-btn btn-deep';
+  btnDeep.textContent = 'Deep Check 🔍';
+  btnDeep.dataset.mode = 'DEEP';
+  
+  container.appendChild(btnLocal);
+  container.appendChild(btnDeep);
+  
+  document.body.appendChild(container);
+  return container;
 }
 
-function updateButtonPosition(btn, img) {
-  if (!img || !btn) return;
+function updateContainerPosition(container, img) {
+  if (!img || !container) return;
   const rect = img.getBoundingClientRect();
   // Only update if image is visible
   if (rect.width === 0 || rect.height === 0) {
-      btn.style.display = 'none';
+      container.style.display = 'none';
       return;
   }
-  btn.style.display = 'block';
-  btn.style.top = `${rect.top + window.scrollY + 10}px`;
-  btn.style.left = `${rect.right + window.scrollX - btn.offsetWidth - 10}px`;
+  container.style.display = 'flex';
+  container.style.gap = '5px';
+  container.style.top = `${rect.top + window.scrollY + 10}px`;
+  container.style.left = `${rect.right + window.scrollX - container.offsetWidth - 10}px`;
 }
 
-// Initialize the single reusable hover button
-hoverButton = createButton();
-let currentMode = 'LOCAL';
+// Initialize the single reusable hover container
+hoverContainer = createContainer();
 
-function showHoverButtonForImage(img) {
+function showHoverContainerForImage(img) {
   if (img.naturalWidth < 100 || img.naturalHeight < 100) return;
-  if (pinnedButtons.has(img)) return; // Don't show hover button if image already has a pinned button!
+  if (pinnedContainers.has(img)) return; // Don't show hover container if image already has a pinned container!
 
   activeHoverImage = img;
-  currentMode = 'LOCAL';
-  hoverButton.className = 'aicheck-btn aicheck-floating';
-  hoverButton.textContent = 'Check?';
   
-  updateButtonPosition(hoverButton, img);
+  // Reset buttons
+  const btnLocal = hoverContainer.querySelector('.btn-local');
+  const btnDeep = hoverContainer.querySelector('.btn-deep');
+  
+  btnLocal.className = 'aicheck-btn btn-local';
+  btnLocal.textContent = 'Local Check';
+  btnLocal.style.display = 'block';
+  
+  btnDeep.className = 'aicheck-btn btn-deep';
+  btnDeep.textContent = 'Deep Check 🔍';
+  btnDeep.style.display = 'block';
+  
+  updateContainerPosition(hoverContainer, img);
 }
 
-// Track mouse movements to show/hide the hover button
+// Track mouse movements to show/hide the hover container
 document.addEventListener('mouseover', (e) => {
-  if (e.target === hoverButton) return;
+  if (hoverContainer.contains(e.target)) return;
   if (e.target.tagName === 'IMG') {
-      showHoverButtonForImage(e.target);
+      showHoverContainerForImage(e.target);
   }
 });
 
-// Hide hover button if mouse leaves image and doesn't enter button
+// Hide hover container if mouse leaves image and doesn't enter container
 document.addEventListener('mousemove', (e) => {
     if (!activeHoverImage) return;
-    if (e.target === activeHoverImage || e.target === hoverButton) return;
+    if (e.target === activeHoverImage || hoverContainer.contains(e.target)) return;
     
     const rect = activeHoverImage.getBoundingClientRect();
     const buffer = 20;
@@ -64,103 +86,110 @@ document.addEventListener('mousemove', (e) => {
         e.clientY < rect.top - buffer || 
         e.clientY > rect.bottom + buffer
     ) {
-        hoverButton.style.display = 'none';
+        hoverContainer.style.display = 'none';
         activeHoverImage = null;
     }
 });
 
-// Update all button positions on scroll/resize
+// Update all container positions on scroll/resize
 function updateAllPositions() {
-    if (activeHoverImage && hoverButton.style.display !== 'none') {
-        updateButtonPosition(hoverButton, activeHoverImage);
+    if (activeHoverImage && hoverContainer.style.display !== 'none') {
+        updateContainerPosition(hoverContainer, activeHoverImage);
     }
-    for (const [img, btn] of pinnedButtons.entries()) {
-        updateButtonPosition(btn, img);
+    for (const [img, container] of pinnedContainers.entries()) {
+        updateContainerPosition(container, img);
     }
 }
 window.addEventListener('scroll', updateAllPositions, { passive: true });
 window.addEventListener('resize', updateAllPositions, { passive: true });
 
-function handleButtonClick(btn, img) {
+function handleButtonClick(btn, img, container) {
     if (btn.classList.contains('loading')) return;
     
-    // PIN THE BUTTON if it's the hover button
-    if (btn === hoverButton) {
-        pinnedButtons.set(img, hoverButton);
-        hoverButton = createButton(); // Generate a new reusable hover button for future images
+    // PIN THE CONTAINER if it's the hover container
+    if (container === hoverContainer) {
+        pinnedContainers.set(img, hoverContainer);
+        hoverContainer = createContainer(); // Generate a new reusable hover container for future images
         activeHoverImage = null; // Clear active hover
     }
     
-    btn.textContent = currentMode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
-    btn.className = 'aicheck-btn aicheck-floating loading';
+    const mode = btn.dataset.mode;
+    const otherBtn = container.querySelector(mode === 'LOCAL' ? '.btn-deep' : '.btn-local');
+    if (otherBtn) otherBtn.style.display = 'none'; // Hide the other button while scanning
     
-    const messageType = currentMode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
+    btn.textContent = mode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
+    btn.className = `aicheck-btn ${mode === 'LOCAL' ? 'btn-local' : 'btn-deep'} loading`;
+    
+    const messageType = mode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
     
     chrome.runtime.sendMessage(
       { type: messageType, imageUrl: img.src },
       (response) => {
         if (!response || response.error) {
-          btn.className = 'aicheck-btn aicheck-floating error';
+          btn.className = 'aicheck-btn error';
           let errText = response ? response.error : 'No response';
           btn.textContent = '⚠️ ' + (errText.length > 25 ? errText.substring(0,25) + '...' : errText);
           btn.title = errText;
         } else if (response.status === 'NO_LICENSE') {
-          btn.className = 'aicheck-btn aicheck-floating locked';
+          btn.className = 'aicheck-btn locked';
           btn.textContent = '🔒 Get License';
           btn.onclick = () => alert("Please purchase a license key and enter it in the extension popup.");
         } else if (response.status === 'NO_CREDITS') {
-          btn.className = 'aicheck-btn aicheck-floating locked';
-          btn.textContent = '💳 Out of credits';
+          btn.className = 'aicheck-btn locked';
+          btn.textContent = '💸 Out of credits';
         } else {
           const score = Math.round(response.score * 100);
           
-          if (currentMode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
-            btn.className = 'aicheck-btn aicheck-floating possibly-ai possibly-ai-escalate';
-            btn.textContent = `⚠ Inconclusive (${score}%) - Deep Scan?`;
-            currentMode = 'DEEP';
+          if (mode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
+            btn.className = 'aicheck-btn possibly-ai possibly-ai-escalate';
+            btn.textContent = `🤔 Inconclusive (${score}%) - Deep Scan?`;
+            btn.dataset.mode = 'DEEP'; // Allow user to click again to trigger deep scan
           } else {
-            const suffix = currentMode === 'LOCAL' ? '(Local)' : '(Deep)';
+            const suffix = mode === 'LOCAL' ? '(Local)' : '(Deep)';
             switch(response.label) {
               case 'Not AI':
-                btn.className = 'aicheck-btn aicheck-floating not-ai';
-                btn.textContent = `✓ Not AI ${suffix}`;
+                btn.className = 'aicheck-btn not-ai';
+                btn.textContent = `✅ Not AI ${suffix}`;
                 break;
               case 'Possibly AI':
-                btn.className = 'aicheck-btn aicheck-floating possibly-ai';
-                btn.textContent = `⚠ Possibly AI (${score}%) ${suffix}`;
+                btn.className = 'aicheck-btn possibly-ai';
+                btn.textContent = `🤔 Possibly AI (${score}%) ${suffix}`;
                 break;
               case 'Likely AI':
-                btn.className = 'aicheck-btn aicheck-floating likely-ai';
-                btn.textContent = `⚡ Likely AI (${score}%) ${suffix}`;
+                btn.className = 'aicheck-btn likely-ai';
+                btn.textContent = `🚨 Likely AI (${score}%) ${suffix}`;
                 break;
               case 'Surely AI':
-                btn.className = 'aicheck-btn aicheck-floating surely-ai';
-                btn.textContent = `🤖 Surely AI (${score}%) ${suffix}`;
+                btn.className = 'aicheck-btn surely-ai';
+                btn.textContent = `⚠️ Surely AI (${score}%) ${suffix}`;
                 break;
               default:
-                btn.className = 'aicheck-btn aicheck-floating';
-                btn.textContent = 'Check?';
+                btn.className = 'aicheck-btn';
+                btn.textContent = mode === 'LOCAL' ? 'Local Check' : 'Deep Check 🔍';
             }
           }
         }
-        updateButtonPosition(btn, img);
+        updateContainerPosition(container, img);
       }
     );
 }
 
-// Attach click listener to document so we catch clicks on dynamically created hover/pinned buttons
+// Attach click listener to document so we catch clicks on dynamically created buttons
 document.addEventListener('click', (e) => {
     if (e.target.classList.contains('aicheck-btn')) {
         e.preventDefault();
         e.stopPropagation();
         
-        // Find which image this button belongs to
+        const container = e.target.closest('.aicheck-container');
+        if (!container) return;
+        
+        // Find which image this container belongs to
         let targetImg = null;
-        if (e.target === hoverButton) {
+        if (container === hoverContainer) {
             targetImg = activeHoverImage;
         } else {
-            for (const [img, btn] of pinnedButtons.entries()) {
-                if (btn === e.target) {
+            for (const [img, cont] of pinnedContainers.entries()) {
+                if (cont === container) {
                     targetImg = img;
                     break;
                 }
@@ -168,8 +197,7 @@ document.addEventListener('click', (e) => {
         }
         
         if (targetImg) {
-            handleButtonClick(e.target, targetImg);
+            handleButtonClick(e.target, targetImg, container);
         }
     }
 });
-
