@@ -1,0 +1,22 @@
+{
+  "name": "AI Check",
+  "version": "1.0.0",
+  "description": "Detect AI-generated images with one click",
+  "manifest_version": 3,
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "css": ["content.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
