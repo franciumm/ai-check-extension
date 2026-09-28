@@ -1,75 +1,83 @@
 // background.js
 
 const BACKEND_URL = 'https://ai-check-backend.vercel.app';
-const FREE_DAILY_LIMIT = 3;
+let creatingOffscreen; // Promise tracking offscreen creation
 
-// Helper to get today's date string YYYY-MM-DD
-function getTodayDateString() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+// Ensure offscreen document exists
+async function setupOffscreenDocument() {
+  const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [offscreenUrl]
+  });
+
+  if (existingContexts.length > 0) {
+    return;
+  }
+
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+  } else {
+    creatingOffscreen = chrome.offscreen.createDocument({
+      url: offscreenUrl,
+      reasons: ['WORKERS'], // Transformers.js uses workers
+      justification: 'Run local AI models via Transformers.js'
+    });
+    await creatingOffscreen;
+    creatingOffscreen = null;
+    
+    // Initialize model eagerly once created
+    chrome.runtime.sendMessage({ type: 'OFFSCREEN_INIT' });
+  }
 }
 
-// Initialize storage on install
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(['usage'], (result) => {
-    if (!result.usage) {
-      chrome.storage.local.set({
-        usage: {
-          date: getTodayDateString(),
-          count: 0
-        }
-      });
-    }
-  });
-});
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'CHECK_IMAGE') {
-    handleCheckImage(request.imageUrl).then(sendResponse).catch(err => {
+  if (request.type === 'LOCAL_SCAN') {
+    (async () => {
+      try {
+        await setupOffscreenDocument();
+        const response = await chrome.runtime.sendMessage({
+          type: 'OFFSCREEN_SCAN',
+          imageUrl: request.imageUrl
+        });
+        sendResponse(response);
+      } catch (err) {
+        console.error(err);
+        sendResponse({ error: 'Local scan failed: ' + err.message });
+      }
+    })();
+    return true; // async
+  }
+
+  if (request.type === 'DEEP_SCAN') {
+    handleDeepScan(request.imageUrl).then(sendResponse).catch(err => {
       console.error(err);
       sendResponse({ error: err.message || 'Unknown error' });
     });
-    return true; // Keep message channel open for async response
+    return true; // async
   }
   
-  if (request.type === 'GET_USAGE') {
-    getUsage().then(sendResponse);
-    return true;
+  if (request.type === 'GET_LICENSE') {
+      chrome.storage.local.get(['licenseKey'], (res) => {
+          sendResponse({ licenseKey: res.licenseKey || null });
+      });
+      return true;
   }
   
-  if (request.type === 'RESET_USAGE') {
-    const newUsage = { date: getTodayDateString(), count: 0 };
-    chrome.storage.local.set({ usage: newUsage }, () => {
-      sendResponse(newUsage);
-    });
-    return true;
+  if (request.type === 'SET_LICENSE') {
+      chrome.storage.local.set({ licenseKey: request.licenseKey }, () => {
+          sendResponse({ success: true });
+      });
+      return true;
   }
 });
 
-async function getUsage() {
-  const result = await chrome.storage.local.get(['usage']);
-  const today = getTodayDateString();
+async function handleDeepScan(imageUrl) {
+  const storage = await chrome.storage.local.get(['licenseKey']);
+  const licenseKey = storage.licenseKey;
   
-  let usage = result.usage || { date: today, count: 0 };
-  
-  // Reset if it's a new day
-  if (usage.date !== today) {
-    usage = { date: today, count: 0 };
-    await chrome.storage.local.set({ usage });
-  }
-  
-  return {
-    used: usage.count,
-    limit: FREE_DAILY_LIMIT,
-    date: usage.date
-  };
-}
-
-async function handleCheckImage(imageUrl) {
-  const usageStats = await getUsage();
-  
-  if (usageStats.used >= usageStats.limit) {
-    return { status: 'FREE_LIMIT' };
+  if (!licenseKey) {
+    return { status: 'NO_LICENSE' };
   }
   
   try {
@@ -78,30 +86,26 @@ async function handleCheckImage(imageUrl) {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ imageUrl })
+      body: JSON.stringify({ imageUrl, licenseKey })
     });
+    
+    if (response.status === 403) {
+        return { status: 'NO_CREDITS' };
+    }
     
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
     
     const data = await response.json();
-    
-    // Increment usage on success
-    const today = getTodayDateString();
-    await chrome.storage.local.set({
-      usage: {
-        date: today,
-        count: usageStats.used + 1
-      }
-    });
-    
     return {
       score: data.score,
       label: data.label,
+      source: 'cloud',
       generators: data.generators || []
     };
   } catch (err) {
     return { error: err.message };
   }
 }
+

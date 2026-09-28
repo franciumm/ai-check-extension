@@ -1,23 +1,28 @@
 // popup.js
 
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.runtime.sendMessage({ type: 'GET_USAGE' }, (response) => {
-    if (response) {
-      const { used, limit } = response;
-      
-      const usageCountEl = document.getElementById('usage-count');
-      const progressFillEl = document.getElementById('progress-fill');
-      
-      usageCountEl.textContent = `${used} / ${limit}`;
-      
-      const percentage = Math.min((used / limit) * 100, 100);
-      progressFillEl.style.width = `${percentage}%`;
-      
-      if (percentage >= 100) {
-        progressFillEl.style.backgroundColor = '#f44336'; // Red when limit reached
-      } else if (percentage >= 66) {
-        progressFillEl.style.backgroundColor = '#ff9800'; // Orange when close to limit
-      }
-    }
-  });
+    const licenseInput = document.getElementById('license-key');
+    const saveBtn = document.getElementById('save-license');
+
+    // Load existing license
+    chrome.runtime.sendMessage({ type: 'GET_LICENSE' }, (res) => {
+        if (res && res.licenseKey) {
+            licenseInput.value = res.licenseKey;
+            saveBtn.textContent = 'License Saved ✓';
+            saveBtn.style.background = '#059669';
+        }
+    });
+
+    // Save license
+    saveBtn.addEventListener('click', () => {
+        const key = licenseInput.value.trim();
+        chrome.runtime.sendMessage({ type: 'SET_LICENSE', licenseKey: key }, () => {
+            saveBtn.textContent = 'Saved!';
+            saveBtn.style.background = '#059669';
+            setTimeout(() => {
+                saveBtn.textContent = 'Save License';
+                saveBtn.style.background = '#3b82f6';
+            }, 2000);
+        });
+    });
 });
