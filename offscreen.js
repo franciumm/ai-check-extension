@@ -6,6 +6,7 @@ import { pipeline, env } from './transformers.min.js';
 env.allowLocalModels = false; 
 env.allowRemoteModels = true; 
 env.backends.onnx.wasm.numThreads = 1;
+env.backends.onnx.wasm.wasmPaths = '/'; // Load WASM files from the root of the extension
 
 let classifier = null;
 let isInitializing = false;
