@@ -18,7 +18,9 @@ async function initModel() {
       while(isInitializing) {
           await new Promise(r => setTimeout(r, 100));
       }
-      return classifier;
+      if (classifier) return classifier;
+      // If classifier is still null, the previous initialization failed.
+      // We will fall through and try to initialize again!
   }
   
   isInitializing = true;
