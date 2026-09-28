@@ -31,18 +31,38 @@ async function setupOffscreenDocument() {
   }
 }
 
+async function getBase64Image(url) {
+  const response = await fetch(url);
+  const buffer = await response.arrayBuffer();
+  
+  // Convert ArrayBuffer to Base64 in Service Worker
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  const type = response.headers.get('content-type') || 'image/jpeg';
+  return `data:${type};base64,${base64}`;
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'LOCAL_SCAN') {
     (async () => {
       try {
         await setupOffscreenDocument();
+        
+        // Fetch image in the background script to bypass CORS restrictions
+        const dataUrl = await getBase64Image(request.imageUrl);
+        
         const response = await chrome.runtime.sendMessage({
           type: 'OFFSCREEN_SCAN',
-          imageUrl: request.imageUrl
+          imageUrl: dataUrl
         });
         sendResponse(response);
       } catch (err) {
-        console.error(err);
+        console.error("Local Scan Error:", err);
         sendResponse({ error: 'Local scan failed: ' + err.message });
       }
     })();
