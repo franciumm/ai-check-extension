@@ -1,62 +1,62 @@
 // content.js
-// Non-destructive floating button approach to prevent breaking React/Vue layouts (like Twitter)
+// Non-destructive floating button approach with "Pin on Click" logic
 
-let activeImage = null;
-let currentMode = 'LOCAL';
+let hoverButton = null;
+let activeHoverImage = null;
+const pinnedButtons = new Map(); // Maps img -> pinned button element
 
-// Create the floating button
-const btn = document.createElement('button');
-btn.className = 'aicheck-btn aicheck-floating';
-btn.textContent = 'Check?';
-btn.style.display = 'none'; // Hidden by default
-document.body.appendChild(btn);
+function createButton() {
+  const btn = document.createElement('button');
+  btn.className = 'aicheck-btn aicheck-floating';
+  btn.textContent = 'Check?';
+  btn.style.display = 'none';
+  document.body.appendChild(btn);
+  return btn;
+}
 
-// Map to store results for images we've already checked so we don't lose them
-const resultsCache = new WeakMap();
-
-function updateButtonPosition(img) {
+function updateButtonPosition(btn, img) {
+  if (!img || !btn) return;
   const rect = img.getBoundingClientRect();
+  // Only update if image is visible
+  if (rect.width === 0 || rect.height === 0) {
+      btn.style.display = 'none';
+      return;
+  }
+  btn.style.display = 'block';
   btn.style.top = `${rect.top + window.scrollY + 10}px`;
   btn.style.left = `${rect.right + window.scrollX - btn.offsetWidth - 10}px`;
 }
 
-function showButtonForImage(img) {
+// Initialize the single reusable hover button
+hoverButton = createButton();
+let currentMode = 'LOCAL';
+
+function showHoverButtonForImage(img) {
   if (img.naturalWidth < 100 || img.naturalHeight < 100) return;
+  if (pinnedButtons.has(img)) return; // Don't show hover button if image already has a pinned button!
+
+  activeHoverImage = img;
+  currentMode = 'LOCAL';
+  hoverButton.className = 'aicheck-btn aicheck-floating';
+  hoverButton.textContent = 'Check?';
   
-  activeImage = img;
-  
-  // Restore state if we already checked it
-  if (resultsCache.has(img)) {
-      const state = resultsCache.get(img);
-      btn.className = state.className;
-      btn.textContent = state.text;
-      currentMode = state.mode;
-  } else {
-      btn.className = 'aicheck-btn aicheck-floating';
-      btn.textContent = 'Check?';
-      currentMode = 'LOCAL';
-  }
-  
-  btn.style.display = 'block';
-  updateButtonPosition(img);
+  updateButtonPosition(hoverButton, img);
 }
 
-// Track mouse movements to show/hide the button
+// Track mouse movements to show/hide the hover button
 document.addEventListener('mouseover', (e) => {
-  if (e.target === btn) return; // Don't hide if hovering the button itself
-  
+  if (e.target === hoverButton) return;
   if (e.target.tagName === 'IMG') {
-      showButtonForImage(e.target);
+      showHoverButtonForImage(e.target);
   }
 });
 
-// Hide button if mouse leaves image and doesn't enter button
+// Hide hover button if mouse leaves image and doesn't enter button
 document.addEventListener('mousemove', (e) => {
-    if (!activeImage) return;
-    if (e.target === activeImage || e.target === btn) return;
+    if (!activeHoverImage) return;
+    if (e.target === activeHoverImage || e.target === hoverButton) return;
     
-    // Allow a small buffer zone
-    const rect = activeImage.getBoundingClientRect();
+    const rect = activeHoverImage.getBoundingClientRect();
     const buffer = 20;
     if (
         e.clientX < rect.left - buffer || 
@@ -64,93 +64,110 @@ document.addEventListener('mousemove', (e) => {
         e.clientY < rect.top - buffer || 
         e.clientY > rect.bottom + buffer
     ) {
-        // Only hide if we aren't currently loading
-        if (!btn.classList.contains('loading')) {
-            btn.style.display = 'none';
-            activeImage = null;
-        }
+        hoverButton.style.display = 'none';
+        activeHoverImage = null;
     }
 });
 
-// Update position on scroll/resize if button is visible
-window.addEventListener('scroll', () => {
-    if (activeImage && btn.style.display !== 'none') updateButtonPosition(activeImage);
-}, { passive: true });
-window.addEventListener('resize', () => {
-    if (activeImage && btn.style.display !== 'none') updateButtonPosition(activeImage);
-}, { passive: true });
+// Update all button positions on scroll/resize
+function updateAllPositions() {
+    if (activeHoverImage && hoverButton.style.display !== 'none') {
+        updateButtonPosition(hoverButton, activeHoverImage);
+    }
+    for (const [img, btn] of pinnedButtons.entries()) {
+        updateButtonPosition(btn, img);
+    }
+}
+window.addEventListener('scroll', updateAllPositions, { passive: true });
+window.addEventListener('resize', updateAllPositions, { passive: true });
 
-// Handle clicks
-btn.addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  
-  if (btn.classList.contains('loading') || !activeImage) return;
-  
-  btn.textContent = currentMode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
-  btn.className = 'aicheck-btn aicheck-floating loading';
-  
-  const messageType = currentMode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
-  const imgToScan = activeImage;
-  
-  chrome.runtime.sendMessage(
-    { type: messageType, imageUrl: imgToScan.src },
-    (response) => {
-      // If we hovered away while loading, we might still want to save the result
-      if (!response || response.error) {
-        btn.className = 'aicheck-btn aicheck-floating error';
-        btn.textContent = '⚠️ Error';
-      } else if (response.status === 'NO_LICENSE') {
-        btn.className = 'aicheck-btn aicheck-floating locked';
-        btn.textContent = '🔒 Get License';
-        btn.onclick = () => alert("Please purchase a license key and enter it in the extension popup.");
-      } else if (response.status === 'NO_CREDITS') {
-        btn.className = 'aicheck-btn aicheck-floating locked';
-        btn.textContent = '💳 Out of credits';
-      } else {
-        const score = Math.round(response.score * 100);
-        
-        if (currentMode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
-          btn.className = 'aicheck-btn aicheck-floating possibly-ai possibly-ai-escalate';
-          btn.textContent = `⚠ Inconclusive (${score}%) - Deep Scan?`;
-          currentMode = 'DEEP';
+function handleButtonClick(btn, img) {
+    if (btn.classList.contains('loading')) return;
+    
+    // PIN THE BUTTON if it's the hover button
+    if (btn === hoverButton) {
+        pinnedButtons.set(img, hoverButton);
+        hoverButton = createButton(); // Generate a new reusable hover button for future images
+        activeHoverImage = null; // Clear active hover
+    }
+    
+    btn.textContent = currentMode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
+    btn.className = 'aicheck-btn aicheck-floating loading';
+    
+    const messageType = currentMode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
+    
+    chrome.runtime.sendMessage(
+      { type: messageType, imageUrl: img.src },
+      (response) => {
+        if (!response || response.error) {
+          btn.className = 'aicheck-btn aicheck-floating error';
+          btn.textContent = '⚠️ Error';
+        } else if (response.status === 'NO_LICENSE') {
+          btn.className = 'aicheck-btn aicheck-floating locked';
+          btn.textContent = '🔒 Get License';
+          btn.onclick = () => alert("Please purchase a license key and enter it in the extension popup.");
+        } else if (response.status === 'NO_CREDITS') {
+          btn.className = 'aicheck-btn aicheck-floating locked';
+          btn.textContent = '💳 Out of credits';
         } else {
-          const suffix = currentMode === 'LOCAL' ? '(Local)' : '(Deep)';
-          switch(response.label) {
-            case 'Not AI':
-              btn.className = 'aicheck-btn aicheck-floating not-ai';
-              btn.textContent = `✓ Not AI ${suffix}`;
-              break;
-            case 'Possibly AI':
-              btn.className = 'aicheck-btn aicheck-floating possibly-ai';
-              btn.textContent = `⚠ Possibly AI (${score}%) ${suffix}`;
-              break;
-            case 'Likely AI':
-              btn.className = 'aicheck-btn aicheck-floating likely-ai';
-              btn.textContent = `⚡ Likely AI (${score}%) ${suffix}`;
-              break;
-            case 'Surely AI':
-              btn.className = 'aicheck-btn aicheck-floating surely-ai';
-              btn.textContent = `🤖 Surely AI (${score}%) ${suffix}`;
-              break;
-            default:
-              btn.className = 'aicheck-btn aicheck-floating';
-              btn.textContent = 'Check?';
+          const score = Math.round(response.score * 100);
+          
+          if (currentMode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
+            btn.className = 'aicheck-btn aicheck-floating possibly-ai possibly-ai-escalate';
+            btn.textContent = `⚠ Inconclusive (${score}%) - Deep Scan?`;
+            currentMode = 'DEEP';
+          } else {
+            const suffix = currentMode === 'LOCAL' ? '(Local)' : '(Deep)';
+            switch(response.label) {
+              case 'Not AI':
+                btn.className = 'aicheck-btn aicheck-floating not-ai';
+                btn.textContent = `✓ Not AI ${suffix}`;
+                break;
+              case 'Possibly AI':
+                btn.className = 'aicheck-btn aicheck-floating possibly-ai';
+                btn.textContent = `⚠ Possibly AI (${score}%) ${suffix}`;
+                break;
+              case 'Likely AI':
+                btn.className = 'aicheck-btn aicheck-floating likely-ai';
+                btn.textContent = `⚡ Likely AI (${score}%) ${suffix}`;
+                break;
+              case 'Surely AI':
+                btn.className = 'aicheck-btn aicheck-floating surely-ai';
+                btn.textContent = `🤖 Surely AI (${score}%) ${suffix}`;
+                break;
+              default:
+                btn.className = 'aicheck-btn aicheck-floating';
+                btn.textContent = 'Check?';
+            }
           }
         }
+        updateButtonPosition(btn, img);
       }
-      
-      // Save result so it persists if they hover away and come back
-      resultsCache.set(imgToScan, {
-          className: btn.className,
-          text: btn.textContent,
-          mode: currentMode
-      });
-      
-      if (activeImage === imgToScan) {
-          updateButtonPosition(activeImage);
-      }
+    );
+}
+
+// Attach click listener to document so we catch clicks on dynamically created hover/pinned buttons
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('aicheck-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Find which image this button belongs to
+        let targetImg = null;
+        if (e.target === hoverButton) {
+            targetImg = activeHoverImage;
+        } else {
+            for (const [img, btn] of pinnedButtons.entries()) {
+                if (btn === e.target) {
+                    targetImg = img;
+                    break;
+                }
+            }
+        }
+        
+        if (targetImg) {
+            handleButtonClick(e.target, targetImg);
+        }
     }
-  );
 });
 
