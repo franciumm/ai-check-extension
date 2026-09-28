@@ -101,7 +101,9 @@ function handleButtonClick(btn, img) {
       (response) => {
         if (!response || response.error) {
           btn.className = 'aicheck-btn aicheck-floating error';
-          btn.textContent = '⚠️ Error';
+          let errText = response ? response.error : 'No response';
+          btn.textContent = '⚠️ ' + (errText.length > 25 ? errText.substring(0,25) + '...' : errText);
+          btn.title = errText;
         } else if (response.status === 'NO_LICENSE') {
           btn.className = 'aicheck-btn aicheck-floating locked';
           btn.textContent = '🔒 Get License';
