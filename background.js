@@ -32,16 +32,22 @@ async function setupOffscreenDocument() {
 }
 
 async function getBase64Image(url) {
+  if (url.startsWith('data:')) return url; // Already base64
+  
   const response = await fetch(url);
+  if (!response.ok) throw new Error(`Image fetch failed with status: ${response.status}`);
+  
   const buffer = await response.arrayBuffer();
   
-  // Convert ArrayBuffer to Base64 in Service Worker
+  // High-performance ArrayBuffer to Base64 conversion for Service Workers
   let binary = '';
   const bytes = new Uint8Array(buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 8192; // Chunk to avoid call stack limits
+  
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
+  
   const base64 = btoa(binary);
   const type = response.headers.get('content-type') || 'image/jpeg';
   return `data:${type};base64,${base64}`;
