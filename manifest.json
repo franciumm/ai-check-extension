@@ -4,6 +4,11 @@
   "description": "Detect AI-generated images with one click",
   "manifest_version": 3,
   "permissions": ["storage", "offscreen"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
