@@ -22,17 +22,24 @@ async function initModel() {
   
   isInitializing = true;
   try {
-    // Try WebGPU first
-    classifier = await pipeline('image-classification', 'onnx-community/ai-image-detect-distilled-ONNX', {
-      device: 'webgpu'
-    });
-  } catch (e) {
-    console.warn("WebGPU failed, falling back to WASM/CPU:", e);
-    classifier = await pipeline('image-classification', 'onnx-community/ai-image-detect-distilled-ONNX', {
-      device: 'wasm'
-    });
+    try {
+      // Try WebGPU first
+      classifier = await pipeline('image-classification', 'onnx-community/ai-image-detect-distilled-ONNX', {
+        device: 'webgpu'
+      });
+    } catch (e) {
+      console.warn("WebGPU failed, falling back to WASM/CPU:", e);
+      classifier = await pipeline('image-classification', 'onnx-community/ai-image-detect-distilled-ONNX', {
+        device: 'wasm'
+      });
+    }
+  } catch (err) {
+    console.error("Failed to initialize Transformers.js model:", err);
+    throw err;
+  } finally {
+    isInitializing = false;
   }
-  isInitializing = false;
+  
   return classifier;
 }
 
