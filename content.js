@@ -1,147 +1,156 @@
 // content.js
+// Non-destructive floating button approach to prevent breaking React/Vue layouts (like Twitter)
 
-// Keep track of processing to debounce MutationObserver
-let processTimeout = null;
+let activeImage = null;
+let currentMode = 'LOCAL';
 
-// Function to process a single image
-function processImage(img) {
-  // Skip if already processed
-  if (img.dataset.aicheck) return;
+// Create the floating button
+const btn = document.createElement('button');
+btn.className = 'aicheck-btn aicheck-floating';
+btn.textContent = 'Check?';
+btn.style.display = 'none'; // Hidden by default
+document.body.appendChild(btn);
+
+// Map to store results for images we've already checked so we don't lose them
+const resultsCache = new WeakMap();
+
+function updateButtonPosition(img) {
+  const rect = img.getBoundingClientRect();
+  btn.style.top = `${rect.top + window.scrollY + 10}px`;
+  btn.style.left = `${rect.right + window.scrollX - btn.offsetWidth - 10}px`;
+}
+
+function showButtonForImage(img) {
+  if (img.naturalWidth < 100 || img.naturalHeight < 100) return;
   
-  // Skip small images
-  if (img.naturalWidth < 100 || img.naturalHeight < 100) {
-    if (img.complete) {
-        return;
-    } else {
-        img.addEventListener('load', () => {
-            if (img.naturalWidth >= 100 && img.naturalHeight >= 100) {
-                processImage(img);
-            }
-        }, { once: true });
-        return;
+  activeImage = img;
+  
+  // Restore state if we already checked it
+  if (resultsCache.has(img)) {
+      const state = resultsCache.get(img);
+      btn.className = state.className;
+      btn.textContent = state.text;
+      currentMode = state.mode;
+  } else {
+      btn.className = 'aicheck-btn aicheck-floating';
+      btn.textContent = 'Check?';
+      currentMode = 'LOCAL';
+  }
+  
+  btn.style.display = 'block';
+  updateButtonPosition(img);
+}
+
+// Track mouse movements to show/hide the button
+document.addEventListener('mouseover', (e) => {
+  if (e.target === btn) return; // Don't hide if hovering the button itself
+  
+  if (e.target.tagName === 'IMG') {
+      showButtonForImage(e.target);
+  }
+});
+
+// Hide button if mouse leaves image and doesn't enter button
+document.addEventListener('mousemove', (e) => {
+    if (!activeImage) return;
+    if (e.target === activeImage || e.target === btn) return;
+    
+    // Allow a small buffer zone
+    const rect = activeImage.getBoundingClientRect();
+    const buffer = 20;
+    if (
+        e.clientX < rect.left - buffer || 
+        e.clientX > rect.right + buffer || 
+        e.clientY < rect.top - buffer || 
+        e.clientY > rect.bottom + buffer
+    ) {
+        // Only hide if we aren't currently loading
+        if (!btn.classList.contains('loading')) {
+            btn.style.display = 'none';
+            activeImage = null;
+        }
     }
-  }
-  
-  img.dataset.aicheck = 'true';
-  
-  let parent = img.parentElement;
-  if (parent) {
-      const parentStyle = window.getComputedStyle(parent);
-      if (!['relative', 'absolute', 'fixed'].includes(parentStyle.position)) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'aicheck-wrapper';
-          wrapper.style.display = window.getComputedStyle(img).display;
-          if (wrapper.style.display === 'inline') wrapper.style.display = 'inline-block';
-          
-          img.parentNode.insertBefore(wrapper, img);
-          wrapper.appendChild(img);
-          parent = wrapper;
-      }
-  }
+});
 
-  const btn = document.createElement('button');
-  btn.className = 'aicheck-btn';
-  btn.textContent = 'Check?';
+// Update position on scroll/resize if button is visible
+window.addEventListener('scroll', () => {
+    if (activeImage && btn.style.display !== 'none') updateButtonPosition(activeImage);
+}, { passive: true });
+window.addEventListener('resize', () => {
+    if (activeImage && btn.style.display !== 'none') updateButtonPosition(activeImage);
+}, { passive: true });
+
+// Handle clicks
+btn.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
   
-  let currentMode = 'LOCAL'; // 'LOCAL' or 'DEEP'
+  if (btn.classList.contains('loading') || !activeImage) return;
   
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (btn.classList.contains('loading')) return;
-    
-    btn.textContent = currentMode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
-    btn.className = 'aicheck-btn loading';
-    
-    const messageType = currentMode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
-    
-    chrome.runtime.sendMessage(
-      { type: messageType, imageUrl: img.src },
-      (response) => {
-        if (!response || response.error) {
-          btn.className = 'aicheck-btn error';
-          btn.textContent = '⚠️ Error';
-        } else if (response.status === 'NO_LICENSE') {
-          btn.className = 'aicheck-btn locked';
-          btn.textContent = '🔒 Get License';
-          btn.onclick = () => alert("Please purchase a license key and enter it in the extension popup.");
-        } else if (response.status === 'NO_CREDITS') {
-          btn.className = 'aicheck-btn locked';
-          btn.textContent = '💳 Out of credits';
+  btn.textContent = currentMode === 'LOCAL' ? 'Scanning locally...' : 'Deep scanning...';
+  btn.className = 'aicheck-btn aicheck-floating loading';
+  
+  const messageType = currentMode === 'LOCAL' ? 'LOCAL_SCAN' : 'DEEP_SCAN';
+  const imgToScan = activeImage;
+  
+  chrome.runtime.sendMessage(
+    { type: messageType, imageUrl: imgToScan.src },
+    (response) => {
+      // If we hovered away while loading, we might still want to save the result
+      if (!response || response.error) {
+        btn.className = 'aicheck-btn aicheck-floating error';
+        btn.textContent = '⚠️ Error';
+      } else if (response.status === 'NO_LICENSE') {
+        btn.className = 'aicheck-btn aicheck-floating locked';
+        btn.textContent = '🔒 Get License';
+        btn.onclick = () => alert("Please purchase a license key and enter it in the extension popup.");
+      } else if (response.status === 'NO_CREDITS') {
+        btn.className = 'aicheck-btn aicheck-floating locked';
+        btn.textContent = '💳 Out of credits';
+      } else {
+        const score = Math.round(response.score * 100);
+        
+        if (currentMode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
+          btn.className = 'aicheck-btn aicheck-floating possibly-ai possibly-ai-escalate';
+          btn.textContent = `⚠ Inconclusive (${score}%) - Deep Scan?`;
+          currentMode = 'DEEP';
         } else {
-          // Success case
-          const score = Math.round(response.score * 100);
-          
-          // Escalation logic: If local scan is inconclusive (20% to 80%)
-          if (currentMode === 'LOCAL' && response.score >= 0.20 && response.score <= 0.80 && response.source !== 'metadata') {
-            btn.className = 'aicheck-btn possibly-ai possibly-ai-escalate';
-            btn.textContent = `⚠ Inconclusive (${score}%) - Deep Scan?`;
-            currentMode = 'DEEP'; // Next click will run deep scan
-            return;
-          }
-          
-          // Otherwise, show final result
           const suffix = currentMode === 'LOCAL' ? '(Local)' : '(Deep)';
-          
           switch(response.label) {
             case 'Not AI':
-              btn.className = 'aicheck-btn not-ai';
+              btn.className = 'aicheck-btn aicheck-floating not-ai';
               btn.textContent = `✓ Not AI ${suffix}`;
               break;
             case 'Possibly AI':
-              btn.className = 'aicheck-btn possibly-ai';
+              btn.className = 'aicheck-btn aicheck-floating possibly-ai';
               btn.textContent = `⚠ Possibly AI (${score}%) ${suffix}`;
               break;
             case 'Likely AI':
-              btn.className = 'aicheck-btn likely-ai';
+              btn.className = 'aicheck-btn aicheck-floating likely-ai';
               btn.textContent = `⚡ Likely AI (${score}%) ${suffix}`;
               break;
             case 'Surely AI':
-              btn.className = 'aicheck-btn surely-ai';
+              btn.className = 'aicheck-btn aicheck-floating surely-ai';
               btn.textContent = `🤖 Surely AI (${score}%) ${suffix}`;
               break;
             default:
-              btn.className = 'aicheck-btn';
+              btn.className = 'aicheck-btn aicheck-floating';
               btn.textContent = 'Check?';
           }
         }
       }
-    );
-  });
-  
-  if (parent) {
-      parent.style.position = 'relative';
-      parent.appendChild(btn);
-  }
-}
-
-// Process all current images
-function scanImages() {
-  const images = document.querySelectorAll('img:not([data-aicheck])');
-  images.forEach(processImage);
-}
-
-// Initial scan
-scanImages();
-
-// Setup observer for dynamically added images
-const observer = new MutationObserver((mutations) => {
-  let shouldScan = false;
-  for (const mutation of mutations) {
-    if (mutation.addedNodes.length) {
-      shouldScan = true;
-      break;
+      
+      // Save result so it persists if they hover away and come back
+      resultsCache.set(imgToScan, {
+          className: btn.className,
+          text: btn.textContent,
+          mode: currentMode
+      });
+      
+      if (activeImage === imgToScan) {
+          updateButtonPosition(activeImage);
+      }
     }
-  }
-  
-  if (shouldScan) {
-    clearTimeout(processTimeout);
-    processTimeout = setTimeout(scanImages, 250);
-  }
+  );
 });
 
-observer.observe(document.body, {
-  childList: true,
-  subtree: true
-});
