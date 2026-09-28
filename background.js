@@ -1,6 +1,6 @@
 // background.js
 
-const BACKEND_URL = 'https://YOUR_VERCEL_URL';
+const BACKEND_URL = 'https://ai-check-backend.vercel.app';
 const FREE_DAILY_LIMIT = 3;
 
 // Helper to get today's date string YYYY-MM-DD
