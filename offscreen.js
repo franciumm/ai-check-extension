@@ -2,9 +2,10 @@
 
 import { pipeline, env } from './transformers.min.js';
 
-// Configure transformers.js to use WebGPU and download models locally
-env.allowLocalModels = false; 
-env.allowRemoteModels = true; 
+// Configure transformers.js to use local models strictly
+env.allowLocalModels = true; 
+env.allowRemoteModels = false; 
+env.localModelPath = chrome.runtime.getURL('models');
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('/');
 
 let classifier = null;
